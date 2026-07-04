@@ -47,7 +47,7 @@ pub fn recognize_text(image_bytes: &[u8]) -> Result<String, JsValue> {
         .lock()
         .map_err(|_| JsValue::from_str("не удалось получить блокировку модели"))?;
 
-    let input = preprocess::prepare_input(image_bytes).map_err(JsValue::from_str)?;
+    let input = preprocess::prepare_input(image_bytes).map_err(|e| JsValue::from_str(&e))?;
 
     let outputs = model
         .run(tvec!(input.into()))
