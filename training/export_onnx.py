@@ -26,6 +26,7 @@ def export(weights_path: str = "crnn_ocr.pt", out_path: str = "../rust/assets/mo
         output_names=["output"],
         dynamic_axes={"input": {3: "width"}, "output": {0: "time"}},
         opset_version=12,
+        dynamo=False,
     )
     print(f"Модель экспортирована в {out_path}")
 

@@ -8,6 +8,7 @@
 """
 import os
 
+import numpy as np
 import torch
 from torch.nn import CTCLoss
 from torch.utils.data import DataLoader, Dataset
@@ -38,8 +39,8 @@ class OCRDataset(Dataset):
         fname, text = self.samples[idx]
         img = Image.open(os.path.join(self.root, fname)).convert("L")
         img = img.resize((self.img_width, self.img_height))
-        tensor = torch.tensor(list(img.getdata()), dtype=torch.float32)
-        tensor = tensor.view(1, self.img_height, self.img_width)
+        arr = np.asarray(img, dtype=np.float32)  # (H, W)
+        tensor = torch.from_numpy(arr).unsqueeze(0)  # (1, H, W)
         tensor = (tensor / 255.0 - 0.5) / 0.5
         target = torch.tensor([CHAR_TO_IDX[c] for c in text if c in CHAR_TO_IDX], dtype=torch.long)
         return tensor, target, len(target)
