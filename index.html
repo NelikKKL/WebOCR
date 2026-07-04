@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>OCR в браузере на Rust + WASM</title>
+  <style>
+    body { font-family: sans-serif; max-width: 600px; margin: 40px auto; }
+    pre { background: #f4f4f4; padding: 12px; border-radius: 6px; min-height: 2em; }
+    img { max-width: 100%; margin-top: 12px; border: 1px solid #ddd; }
+  </style>
+</head>
+<body>
+  <h1>Распознавание текста с изображения</h1>
+  <input type="file" id="file" accept="image/png,image/jpeg">
+  <img id="preview" style="display:none">
+  <h3>Результат:</h3>
+  <pre id="result">Загрузите изображение…</pre>
+
+  <script type="module" src="./index.js"></script>
+</body>
+</html>
