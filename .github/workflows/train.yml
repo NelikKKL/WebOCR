@@ -94,7 +94,7 @@ jobs:
 
       - name: Обучение пропущено (кэш или готовый чекпоинт в репозитории)
         if: steps.cache-checkpoint.outputs.cache-hit == 'true' || steps.checkpoint-in-repo.outputs.exists == 'true'
-        run: echo "Обучение пропущено: чекпоинт уже доступен (кэш или файл в репозитории)."
+        run: 'echo "Обучение пропущено: чекпоинт уже доступен (кэш или файл в репозитории)."'
 
       - name: Публикация чекпоинта как артефакта (для джобы export)
         uses: actions/upload-artifact@v4
