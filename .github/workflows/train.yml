@@ -32,6 +32,7 @@ jobs:
         with:
           python-version: '3.11'
           cache: 'pip'
+          cache-dependency-path: training/requirements.txt
 
       - name: Установка английских шрифтов разных стилей
         run: |
@@ -46,10 +47,8 @@ jobs:
           find /usr/share/fonts -iname '*.ttf' -exec cp {} training/fonts/ \;
           echo "Найдено шрифтов: $(ls training/fonts | wc -l)"
 
-      - name: Установка Python-зависимостей (torch CPU-версия)
-        run: |
-          pip install torch --index-url https://download.pytorch.org/whl/cpu
-          pip install pillow onnx
+      - name: Установка Python-зависимостей
+        run: pip install -r training/requirements.txt
 
       - name: Генерация синтетического датасета
         working-directory: training
