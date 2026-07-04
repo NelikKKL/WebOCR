@@ -8,7 +8,7 @@
 import torch
 
 from model import CRNN
-from train import CHARSET
+from charset import CHARSET
 
 def export(weights_path: str = "crnn_ocr.pt", out_path: str = "../rust/assets/model.onnx"):
     model = CRNN(num_classes=len(CHARSET) + 1)

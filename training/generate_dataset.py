@@ -13,11 +13,7 @@ import random
 import string
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
-CHARSET = (
-    " !\"#$%&'()*+,-./0123456789:;<=>?@"
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`"
-    "abcdefghijklmnopqrstuvwxyz{|}~"
-)
+from charset import CHARSET
 
 WORDS_POOL = list(string.ascii_letters) + [
     "the", "quick", "brown", "fox", "jumps", "over", "lazy", "dog",

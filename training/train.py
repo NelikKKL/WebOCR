@@ -16,12 +16,7 @@ from PIL import Image
 
 from model import CRNN
 
-CHARSET = (
-    " !\"#$%&'()*+,-./0123456789:;<=>?@"
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`"
-    "abcdefghijklmnopqrstuvwxyz{|}~"
-)
-CHAR_TO_IDX = {c: i + 1 for i, c in enumerate(CHARSET)}  # 0 зарезервирован под CTC-blank
+from charset import CHARSET, CHAR_TO_IDX
 
 
 class OCRDataset(Dataset):
