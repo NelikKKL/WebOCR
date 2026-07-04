@@ -1,4 +1,4 @@
-import init, { load_model, recognize_text } from "../rust/pkg/webocr.js";
+import init, { load_model, recognize_text } from "./webocr.js";
 
 const resultEl = document.getElementById("result");
 const previewEl = document.getElementById("preview");
@@ -9,7 +9,7 @@ async function main() {
   await init();
 
   resultEl.textContent = "Загрузка модели…";
-  const modelResp = await fetch("../rust/assets/model.onnx");
+  const modelResp = await fetch("model.onnx");
   const modelBytes = new Uint8Array(await modelResp.arrayBuffer());
   load_model(modelBytes);
 
