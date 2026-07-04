@@ -24,3 +24,11 @@ lto = true
 codegen-units = 1
 panic = "abort"
 strip = true
+
+# rustc для wasm32-unknown-unknown по умолчанию генерирует инструкции
+# bulk-memory (memory.copy/memory.fill) и nontrapping-float-to-int
+# (i32.trunc_sat_f64_u и т.п.). Бинарник wasm-opt, который использует
+# wasm-pack, по умолчанию их не разрешает и падает на валидации —
+# явно включаем обе фичи.
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = ["-O", "--enable-bulk-memory", "--enable-nontrapping-float-to-int"]
