@@ -1,0 +1,84 @@
+name: Build WASM
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'training/**'
+  workflow_run:
+    workflows: ["Train Model"]
+    types: [completed]
+  workflow_dispatch:
+
+jobs:
+  build:
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Установка Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Кэш cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+
+      - name: Установка wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - name: Проверка наличия обученной модели
+        run: |
+          if [ ! -f rust/assets/model.onnx ]; then
+            echo "::error::rust/assets/model.onnx не найден. Сначала запустите workflow 'Train Model'."
+            exit 1
+          fi
+
+      - name: Сборка wasm-пакета
+        working-directory: rust
+        run: wasm-pack build --target web --release
+
+      - name: Тесты
+        working-directory: rust
+        run: cargo test
+
+      - name: Проверка размера итогового .wasm
+        working-directory: rust
+        run: |
+          SIZE=$(stat -c%s pkg/webocr_bg.wasm)
+          echo "Размер .wasm: $SIZE байт"
+          # Ограничение <100 МБ из требования проекта
+          if [ "$SIZE" -gt 104857600 ]; then
+            echo "::error::wasm-файл превышает 100 МБ"
+            exit 1
+          fi
+
+      - name: Публикация артефакта
+        uses: actions/upload-artifact@v4
+        with:
+          name: pkg
+          path: rust/pkg
+
+  deploy-demo:
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Скачать собранный pkg
+        uses: actions/download-artifact@v4
+        with:
+          name: pkg
+          path: rust/pkg
+
+      - name: Деплой демо на GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./www

@@ -1,0 +1,83 @@
+name: Train Model
+
+# Обучение запускается вручную (можно задать число примеров/эпох) либо
+# автоматически при изменении кода в training/. Само обучение и генерация
+# датасета выполняются прямо в CI, на стандартном ubuntu-раннере (CPU,
+# без GPU) — см. примечание про время выполнения в README.
+on:
+  workflow_dispatch:
+    inputs:
+      samples:
+        description: 'Число синтетических примеров'
+        default: '20000'
+      epochs:
+        description: 'Число эпох обучения'
+        default: '15'
+  push:
+    branches: [main]
+    paths:
+      - 'training/**'
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    # Обучение на CPU может занимать долго — увеличиваем таймаут против
+    # дефолтных 360 минут GitHub Actions (максимум для public-репозиториев)
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Установка Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Установка английских шрифтов разных стилей
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            fonts-dejavu fonts-liberation fonts-liberation2 \
+            fonts-noto-core fonts-freefont-ttf
+
+      - name: Сбор шрифтов в training/fonts
+        run: |
+          mkdir -p training/fonts
+          find /usr/share/fonts -iname '*.ttf' -exec cp {} training/fonts/ \;
+          echo "Найдено шрифтов: $(ls training/fonts | wc -l)"
+
+      - name: Установка Python-зависимостей (torch CPU-версия)
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install pillow onnx
+
+      - name: Генерация синтетического датасета
+        working-directory: training
+        run: python generate_dataset.py --n-samples ${{ github.event.inputs.samples || '20000' }}
+
+      - name: Обучение модели
+        working-directory: training
+        run: python train.py --epochs ${{ github.event.inputs.epochs || '15' }}
+
+      - name: Экспорт в ONNX
+        working-directory: training
+        run: python export_onnx.py
+
+      - name: Публикация артефактов обучения (веса + onnx + логи)
+        uses: actions/upload-artifact@v4
+        with:
+          name: trained-model
+          path: |
+            rust/assets/model.onnx
+            training/crnn_ocr.pt
+
+      - name: Коммит обученной модели в репозиторий
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore(model): обновление обученной ONNX-модели"
+          file_pattern: rust/assets/model.onnx
+          commit_user_name: "webocr-bot"
+          commit_user_email: "actions@github.com"
+
+      # Коммит модели (файл вне training/) автоматически запустит
+      # workflow build.yml, который соберёт свежий .wasm-пакет.
