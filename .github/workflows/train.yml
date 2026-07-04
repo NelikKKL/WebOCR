@@ -27,6 +27,11 @@ on:
     paths:
       - 'training/**'
 
+# По умолчанию GITHUB_TOKEN выдаётся только с правом на чтение — без этого
+# блока git-auto-commit-action получает 403 при попытке запушить коммит.
+permissions:
+  contents: write
+
 jobs:
   train:
     runs-on: ubuntu-latest
