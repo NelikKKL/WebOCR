@@ -1,9 +1,14 @@
 name: Train Model
 
 # Обучение запускается вручную (можно задать число примеров/эпох) либо
-# автоматически при изменении кода в training/. Само обучение и генерация
-# датасета выполняются прямо в CI, на стандартном ubuntu-раннере (CPU,
-# без GPU) — см. примечание про время выполнения в README.
+# автоматически при изменении кода в training/. Обучение и экспорт разбиты
+# на отдельные джобы: если экспорт упадёт (например, из-за версии torch),
+# можно перезапустить через "Re-run failed jobs" — GitHub переиспользует
+# артефакт с уже обученными весами и НЕ будет обучать модель заново.
+#
+# Дополнительно чекпоинт кэшируется по хэшу training-скриптов и параметров:
+# если код обучения и датасет не менялись, шаги генерации/обучения вообще
+# пропускаются, а веса берутся из кэша.
 on:
   workflow_dispatch:
     inputs:
@@ -21,8 +26,6 @@ on:
 jobs:
   train:
     runs-on: ubuntu-latest
-    # Обучение на CPU может занимать долго — увеличиваем таймаут против
-    # дефолтных 360 минут GitHub Actions (максимум для public-репозиториев)
     timeout-minutes: 350
     steps:
       - uses: actions/checkout@v4
@@ -50,25 +53,73 @@ jobs:
       - name: Установка Python-зависимостей
         run: pip install -r training/requirements.txt
 
+      - name: Вычисление ключа кэша обучения
+        id: cache-key
+        run: |
+          HASH=$(cat training/model.py training/train.py training/generate_dataset.py | sha256sum | cut -d' ' -f1)
+          SAMPLES="${{ github.event.inputs.samples || '20000' }}"
+          EPOCHS="${{ github.event.inputs.epochs || '15' }}"
+          echo "key=checkpoint-${HASH}-s${SAMPLES}-e${EPOCHS}" >> "$GITHUB_OUTPUT"
+
+      - name: Кэш обученных весов
+        id: cache-checkpoint
+        uses: actions/cache@v4
+        with:
+          path: training/crnn_ocr.pt
+          key: ${{ steps.cache-key.outputs.key }}
+
       - name: Генерация синтетического датасета
+        if: steps.cache-checkpoint.outputs.cache-hit != 'true'
         working-directory: training
         run: python generate_dataset.py --n-samples ${{ github.event.inputs.samples || '20000' }}
 
       - name: Обучение модели
+        if: steps.cache-checkpoint.outputs.cache-hit != 'true'
         working-directory: training
         run: python train.py --epochs ${{ github.event.inputs.epochs || '15' }}
+
+      - name: Веса взяты из кэша (обучение пропущено)
+        if: steps.cache-checkpoint.outputs.cache-hit == 'true'
+        run: echo "Найден кэш по ключу '${{ steps.cache-key.outputs.key }}' — код и параметры обучения не менялись."
+
+      - name: Публикация чекпоинта как артефакта (для джобы export)
+        uses: actions/upload-artifact@v4
+        with:
+          name: checkpoint
+          path: training/crnn_ocr.pt
+
+  export:
+    needs: train
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Установка Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Установка зависимостей для экспорта (только torch + onnx)
+        run: pip install torch onnx --extra-index-url https://download.pytorch.org/whl/cpu
+
+      - name: Скачать обученный чекпоинт
+        uses: actions/download-artifact@v4
+        with:
+          name: checkpoint
+          path: training
+
+      - name: Создать rust/assets (пустые папки не хранятся в git)
+        run: mkdir -p rust/assets
 
       - name: Экспорт в ONNX
         working-directory: training
         run: python export_onnx.py
 
-      - name: Публикация артефактов обучения (веса + onnx + логи)
+      - name: Публикация model.onnx как артефакта
         uses: actions/upload-artifact@v4
         with:
           name: trained-model
-          path: |
-            rust/assets/model.onnx
-            training/crnn_ocr.pt
+          path: rust/assets/model.onnx
 
       - name: Коммит обученной модели в репозиторий
         uses: stefanzweifel/git-auto-commit-action@v5
