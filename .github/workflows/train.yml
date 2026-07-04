@@ -6,9 +6,13 @@ name: Train Model
 # можно перезапустить через "Re-run failed jobs" — GitHub переиспользует
 # артефакт с уже обученными весами и НЕ будет обучать модель заново.
 #
-# Дополнительно чекпоинт кэшируется по хэшу training-скриптов и параметров:
-# если код обучения и датасет не менялись, шаги генерации/обучения вообще
-# пропускаются, а веса берутся из кэша.
+# Дополнительно чекпоинт кэшируется по training/CACHE_VERSION + параметрам
+# samples/epochs: если версия и параметры не менялись, шаги генерации
+# датасета и обучения пропускаются, веса берутся из кэша. Версию нужно
+# увеличивать вручную (training/CACHE_VERSION), когда меняется что-то,
+# реально влияющее на результат обучения — архитектура модели, логика
+# генерации данных, гиперпараметры. Рефакторинг кода (не меняющий
+# поведение) кэш не ломает.
 on:
   workflow_dispatch:
     inputs:
@@ -56,10 +60,10 @@ jobs:
       - name: Вычисление ключа кэша обучения
         id: cache-key
         run: |
-          HASH=$(cat training/model.py training/train.py training/generate_dataset.py | sha256sum | cut -d' ' -f1)
+          VERSION=$(cat training/CACHE_VERSION)
           SAMPLES="${{ github.event.inputs.samples || '20000' }}"
           EPOCHS="${{ github.event.inputs.epochs || '15' }}"
-          echo "key=checkpoint-${HASH}-s${SAMPLES}-e${EPOCHS}" >> "$GITHUB_OUTPUT"
+          echo "key=checkpoint-v${VERSION}-s${SAMPLES}-e${EPOCHS}" >> "$GITHUB_OUTPUT"
 
       - name: Кэш обученных весов
         id: cache-checkpoint
@@ -68,19 +72,29 @@ jobs:
           path: training/crnn_ocr.pt
           key: ${{ steps.cache-key.outputs.key }}
 
+      - name: Проверка, не закоммичен ли чекпоинт вручную
+        id: checkpoint-in-repo
+        run: |
+          if [ -f training/crnn_ocr.pt ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Чекпоинт уже есть в репозитории — обучение будет пропущено."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Генерация синтетического датасета
-        if: steps.cache-checkpoint.outputs.cache-hit != 'true'
+        if: steps.cache-checkpoint.outputs.cache-hit != 'true' && steps.checkpoint-in-repo.outputs.exists != 'true'
         working-directory: training
         run: python generate_dataset.py --n-samples ${{ github.event.inputs.samples || '20000' }}
 
       - name: Обучение модели
-        if: steps.cache-checkpoint.outputs.cache-hit != 'true'
+        if: steps.cache-checkpoint.outputs.cache-hit != 'true' && steps.checkpoint-in-repo.outputs.exists != 'true'
         working-directory: training
         run: python train.py --epochs ${{ github.event.inputs.epochs || '15' }}
 
-      - name: Веса взяты из кэша (обучение пропущено)
-        if: steps.cache-checkpoint.outputs.cache-hit == 'true'
-        run: echo "Найден кэш по ключу '${{ steps.cache-key.outputs.key }}' — код и параметры обучения не менялись."
+      - name: Обучение пропущено (кэш или готовый чекпоинт в репозитории)
+        if: steps.cache-checkpoint.outputs.cache-hit == 'true' || steps.checkpoint-in-repo.outputs.exists == 'true'
+        run: echo "Обучение пропущено: чекпоинт уже доступен (кэш или файл в репозитории)."
 
       - name: Публикация чекпоинта как артефакта (для джобы export)
         uses: actions/upload-artifact@v4
