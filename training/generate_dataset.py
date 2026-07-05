@@ -13,20 +13,34 @@ import random
 import string
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
-from charset import CHARSET
+from charset import get_charset
 
-WORDS_POOL = list(string.ascii_letters) + [
+CYRILLIC_LETTERS = list(
+    "АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯабвгдеёжзийклмнопрстуфхцчшщъыьэюя"
+)
+
+WORDS_POOL_EN = list(string.ascii_letters) + [
     "the", "quick", "brown", "fox", "jumps", "over", "lazy", "dog",
     "Hello", "World", "Rust", "WASM", "OCR", "2026", "Invoice", "Total",
 ]
 
+WORDS_POOL_RU = CYRILLIC_LETTERS + [
+    "привет", "мир", "быстрая", "коричневая", "лиса", "прыгает", "через",
+    "ленивую", "собаку", "текст", "документ", "счёт", "итого", "накладная",
+    "2026", "Россия", "Москва", "программа",
+]
 
-def random_text(min_len: int = 3, max_len: int = 14) -> str:
+WORDS_POOLS = {"en": WORDS_POOL_EN, "ru": WORDS_POOL_RU}
+
+
+def random_text(lang: str = "en", min_len: int = 3, max_len: int = 14) -> str:
+    charset = get_charset(lang)
+    words_pool = WORDS_POOLS[lang]
     if random.random() < 0.5:
         n = random.randint(min_len, max_len)
-        return "".join(random.choice(CHARSET.strip()) for _ in range(n))
+        return "".join(random.choice(charset.strip()) for _ in range(n))
     n_words = random.randint(1, 3)
-    return " ".join(random.choice(WORDS_POOL) for _ in range(n_words))[:max_len]
+    return " ".join(random.choice(words_pool) for _ in range(n_words))[:max_len]
 
 
 def render_sample(text: str, font_path: str, img_height: int = 32) -> Image.Image:
@@ -56,19 +70,46 @@ def render_sample(text: str, font_path: str, img_height: int = 32) -> Image.Imag
     return img
 
 
-def build_dataset(fonts_dir: str, out_dir: str, n_samples: int = 50_000) -> None:
-    fonts = [
+def _font_supports_text(font_path: str, text: str) -> bool:
+    """Грубая проверка, что шрифт умеет рисовать нужные символы (например,
+    кириллицу) — иначе PIL молча подставит «квадратики»/пустые глифы."""
+    try:
+        font = ImageFont.truetype(font_path, 20)
+        for ch in set(text):
+            if ch == " ":
+                continue
+            if font.getmask(ch).getbbox() is None:
+                return False
+        return True
+    except Exception:
+        return False
+
+
+def build_dataset(fonts_dir: str, out_dir: str, n_samples: int = 50_000, lang: str = "en") -> None:
+    all_fonts = [
         os.path.join(fonts_dir, f)
         for f in os.listdir(fonts_dir)
         if f.lower().endswith((".ttf", ".otf"))
     ]
-    if not fonts:
+    if not all_fonts:
         raise RuntimeError(f"Не найдено шрифтов в {fonts_dir}. Добавьте .ttf/.otf файлы.")
+
+    if lang == "ru":
+        probe = "".join(CYRILLIC_LETTERS[:10])
+        fonts = [f for f in all_fonts if _font_supports_text(f, probe)]
+        if not fonts:
+            raise RuntimeError(
+                "Ни один шрифт в "
+                f"{fonts_dir} не поддерживает кириллицу. Установите шрифты с "
+                "поддержкой русского языка (например, DejaVu Sans, Noto Sans)."
+            )
+    else:
+        fonts = all_fonts
 
     os.makedirs(out_dir, exist_ok=True)
     labels = []
     for i in range(n_samples):
-        text = random_text()
+        text = random_text(lang=lang)
         font_path = random.choice(fonts)
         try:
             img = render_sample(text, font_path)
@@ -92,6 +133,12 @@ if __name__ == "__main__":
     parser.add_argument("--fonts-dir", default="fonts")
     parser.add_argument("--out-dir", default="dataset")
     parser.add_argument("--n-samples", type=int, default=50_000)
+    parser.add_argument("--lang", choices=["en", "ru"], default="en", help="Язык датасета")
     args = parser.parse_args()
 
-    build_dataset(fonts_dir=args.fonts_dir, out_dir=args.out_dir, n_samples=args.n_samples)
+    build_dataset(
+        fonts_dir=args.fonts_dir,
+        out_dir=args.out_dir,
+        n_samples=args.n_samples,
+        lang=args.lang,
+    )

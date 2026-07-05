@@ -16,14 +16,15 @@ from PIL import Image
 
 from model import CRNN
 
-from charset import CHARSET, CHAR_TO_IDX
+from charset import get_charset, get_char_to_idx
 
 
 class OCRDataset(Dataset):
-    def __init__(self, root: str, img_height: int = 32, img_width: int = 128):
+    def __init__(self, root: str, char_to_idx: dict, img_height: int = 32, img_width: int = 128):
         self.root = root
         self.img_height = img_height
         self.img_width = img_width
+        self.char_to_idx = char_to_idx
         with open(os.path.join(root, "labels.txt"), encoding="utf-8") as f:
             self.samples = [line.strip().split("\t") for line in f if line.strip()]
 
@@ -37,7 +38,9 @@ class OCRDataset(Dataset):
         arr = np.asarray(img, dtype=np.float32)  # (H, W)
         tensor = torch.from_numpy(arr).unsqueeze(0)  # (1, H, W)
         tensor = (tensor / 255.0 - 0.5) / 0.5
-        target = torch.tensor([CHAR_TO_IDX[c] for c in text if c in CHAR_TO_IDX], dtype=torch.long)
+        target = torch.tensor(
+            [self.char_to_idx[c] for c in text if c in self.char_to_idx], dtype=torch.long
+        )
         return tensor, target, len(target)
 
 
@@ -49,14 +52,25 @@ def collate(batch):
     return imgs, targets_cat, lengths
 
 
-def train(dataset_dir: str = "dataset", epochs: int = 20, batch_size: int = 64, lr: float = 1e-3):
+def train(
+    dataset_dir: str = "dataset",
+    epochs: int = 20,
+    batch_size: int = 64,
+    lr: float = 1e-3,
+    lang: str = "en",
+):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"устройство: {device}")
+    print(f"язык: {lang}")
 
-    ds = OCRDataset(dataset_dir)
+    charset = get_charset(lang)
+    char_to_idx = get_char_to_idx(lang)
+    checkpoint_path = f"crnn_ocr_{lang}.pt"
+
+    ds = OCRDataset(dataset_dir, char_to_idx=char_to_idx)
     dl = DataLoader(ds, batch_size=batch_size, shuffle=True, collate_fn=collate, num_workers=2)
 
-    model = CRNN(num_classes=len(CHARSET) + 1).to(device)
+    model = CRNN(num_classes=len(charset) + 1).to(device)
     criterion = CTCLoss(blank=0, zero_infinity=True)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
@@ -81,9 +95,9 @@ def train(dataset_dir: str = "dataset", epochs: int = 20, batch_size: int = 64, 
 
         avg_loss = total_loss / len(dl)
         print(f"эпоха {epoch + 1}/{epochs}  loss={avg_loss:.4f}")
-        torch.save(model.state_dict(), "crnn_ocr.pt")
+        torch.save(model.state_dict(), checkpoint_path)
 
-    print("Обучение завершено, веса сохранены в crnn_ocr.pt")
+    print(f"Обучение завершено, веса сохранены в {checkpoint_path}")
 
 
 if __name__ == "__main__":
@@ -94,6 +108,7 @@ if __name__ == "__main__":
     parser.add_argument("--epochs", type=int, default=20)
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--lr", type=float, default=1e-3)
+    parser.add_argument("--lang", choices=["en", "ru"], default="en", help="Язык модели")
     args = parser.parse_args()
 
     train(
@@ -101,4 +116,5 @@ if __name__ == "__main__":
         epochs=args.epochs,
         batch_size=args.batch_size,
         lr=args.lr,
+        lang=args.lang,
     )

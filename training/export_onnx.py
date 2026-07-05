@@ -8,10 +8,15 @@
 import torch
 
 from model import CRNN
-from charset import CHARSET
+from charset import get_charset
 
-def export(weights_path: str = "crnn_ocr.pt", out_path: str = "../rust/assets/model.onnx"):
-    model = CRNN(num_classes=len(CHARSET) + 1)
+
+def export(weights_path: str | None = None, out_path: str | None = None, lang: str = "en"):
+    weights_path = weights_path or f"crnn_ocr_{lang}.pt"
+    out_path = out_path or f"../rust/assets/model_{lang}.onnx"
+
+    charset = get_charset(lang)
+    model = CRNN(num_classes=len(charset) + 1)
     model.load_state_dict(torch.load(weights_path, map_location="cpu"))
     model.eval()
 
@@ -28,8 +33,16 @@ def export(weights_path: str = "crnn_ocr.pt", out_path: str = "../rust/assets/mo
         opset_version=12,
         dynamo=False,
     )
-    print(f"Модель экспортирована в {out_path}")
+    print(f"Модель ({lang}) экспортирована в {out_path}")
 
 
 if __name__ == "__main__":
-    export()
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--weights-path", default=None)
+    parser.add_argument("--out-path", default=None)
+    parser.add_argument("--lang", choices=["en", "ru"], default="en", help="Язык модели")
+    args = parser.parse_args()
+
+    export(weights_path=args.weights_path, out_path=args.out_path, lang=args.lang)
