@@ -37,10 +37,11 @@ jobs:
 
       - name: Проверка наличия обученной модели
         run: |
-          if [ ! -f rust/assets/model.onnx ]; then
-            echo "::error::rust/assets/model.onnx не найден. Сначала запустите workflow 'Train Model'."
+          if ! ls rust/assets/model_*.onnx >/dev/null 2>&1; then
+            echo "::error::В rust/assets нет ни одной обученной модели (model_en.onnx / model_ru.onnx). Сначала запустите workflow 'Train Model' (для нужного языка)."
             exit 1
           fi
+          echo "Найдены модели: $(ls rust/assets/model_*.onnx)"
 
       - name: Сборка wasm-пакета
         working-directory: rust

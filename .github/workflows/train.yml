@@ -16,6 +16,13 @@ name: Train Model
 on:
   workflow_dispatch:
     inputs:
+      language:
+        description: 'Язык модели'
+        type: choice
+        options:
+          - english
+          - russian
+        default: english
       samples:
         description: 'Число синтетических примеров'
         default: '20000'
@@ -36,8 +43,18 @@ jobs:
   train:
     runs-on: ubuntu-latest
     timeout-minutes: 350
+    outputs:
+      lang: ${{ steps.lang.outputs.code }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Определение языка модели
+        id: lang
+        run: |
+          case "${{ github.event.inputs.language || 'english' }}" in
+            russian) echo "code=ru" >> "$GITHUB_OUTPUT" ;;
+            *)        echo "code=en" >> "$GITHUB_OUTPUT" ;;
+          esac
 
       - name: Установка Python
         uses: actions/setup-python@v5
@@ -46,7 +63,7 @@ jobs:
           cache: 'pip'
           cache-dependency-path: training/requirements.txt
 
-      - name: Установка английских шрифтов разных стилей
+      - name: Установка шрифтов (латиница + кириллица)
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
@@ -68,19 +85,20 @@ jobs:
           VERSION=$(cat training/CACHE_VERSION)
           SAMPLES="${{ github.event.inputs.samples || '20000' }}"
           EPOCHS="${{ github.event.inputs.epochs || '15' }}"
-          echo "key=checkpoint-v${VERSION}-s${SAMPLES}-e${EPOCHS}" >> "$GITHUB_OUTPUT"
+          LANG_CODE="${{ steps.lang.outputs.code }}"
+          echo "key=checkpoint-v${VERSION}-${LANG_CODE}-s${SAMPLES}-e${EPOCHS}" >> "$GITHUB_OUTPUT"
 
       - name: Кэш обученных весов
         id: cache-checkpoint
         uses: actions/cache@v4
         with:
-          path: training/crnn_ocr.pt
+          path: training/crnn_ocr_${{ steps.lang.outputs.code }}.pt
           key: ${{ steps.cache-key.outputs.key }}
 
       - name: Проверка, не закоммичен ли чекпоинт вручную
         id: checkpoint-in-repo
         run: |
-          if [ -f training/crnn_ocr.pt ]; then
+          if [ -f "training/crnn_ocr_${{ steps.lang.outputs.code }}.pt" ]; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
             echo "Чекпоинт уже есть в репозитории — обучение будет пропущено."
           else
@@ -90,12 +108,18 @@ jobs:
       - name: Генерация синтетического датасета
         if: steps.cache-checkpoint.outputs.cache-hit != 'true' && steps.checkpoint-in-repo.outputs.exists != 'true'
         working-directory: training
-        run: python generate_dataset.py --n-samples ${{ github.event.inputs.samples || '20000' }}
+        run: >
+          python generate_dataset.py
+          --n-samples ${{ github.event.inputs.samples || '20000' }}
+          --lang ${{ steps.lang.outputs.code }}
 
       - name: Обучение модели
         if: steps.cache-checkpoint.outputs.cache-hit != 'true' && steps.checkpoint-in-repo.outputs.exists != 'true'
         working-directory: training
-        run: python train.py --epochs ${{ github.event.inputs.epochs || '15' }}
+        run: >
+          python train.py
+          --epochs ${{ github.event.inputs.epochs || '15' }}
+          --lang ${{ steps.lang.outputs.code }}
 
       - name: Обучение пропущено (кэш или готовый чекпоинт в репозитории)
         if: steps.cache-checkpoint.outputs.cache-hit == 'true' || steps.checkpoint-in-repo.outputs.exists == 'true'
@@ -104,8 +128,8 @@ jobs:
       - name: Публикация чекпоинта как артефакта (для джобы export)
         uses: actions/upload-artifact@v4
         with:
-          name: checkpoint
-          path: training/crnn_ocr.pt
+          name: checkpoint-${{ steps.lang.outputs.code }}
+          path: training/crnn_ocr_${{ steps.lang.outputs.code }}.pt
 
   export:
     needs: train
@@ -124,7 +148,7 @@ jobs:
       - name: Скачать обученный чекпоинт
         uses: actions/download-artifact@v4
         with:
-          name: checkpoint
+          name: checkpoint-${{ needs.train.outputs.lang }}
           path: training
 
       - name: Создать rust/assets (пустые папки не хранятся в git)
@@ -132,19 +156,19 @@ jobs:
 
       - name: Экспорт в ONNX
         working-directory: training
-        run: python export_onnx.py
+        run: python export_onnx.py --lang ${{ needs.train.outputs.lang }}
 
       - name: Публикация model.onnx как артефакта
         uses: actions/upload-artifact@v4
         with:
-          name: trained-model
-          path: rust/assets/model.onnx
+          name: trained-model-${{ needs.train.outputs.lang }}
+          path: rust/assets/model_${{ needs.train.outputs.lang }}.onnx
 
       - name: Коммит обученной модели в репозиторий
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "chore(model): обновление обученной ONNX-модели"
-          file_pattern: rust/assets/model.onnx
+          commit_message: "chore(model): обновление обученной ONNX-модели (${{ needs.train.outputs.lang }})"
+          file_pattern: rust/assets/model_${{ needs.train.outputs.lang }}.onnx
           commit_user_name: "webocr-bot"
           commit_user_email: "actions@github.com"
 
