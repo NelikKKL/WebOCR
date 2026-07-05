@@ -8,10 +8,13 @@
     pip install pillow
     python generate_dataset.py
 """
+import io
 import os
 import random
 import string
-from PIL import Image, ImageDraw, ImageFont, ImageFilter
+
+import numpy as np
+from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont
 
 from charset import get_charset
 
@@ -43,8 +46,47 @@ def random_text(lang: str = "en", min_len: int = 3, max_len: int = 14) -> str:
     return " ".join(random.choice(words_pool) for _ in range(n_words))[:max_len]
 
 
+def _random_bg_fg(dark_bg: bool) -> tuple[int, int]:
+    """Возвращает (цвет фона, цвет текста). Раньше фон был всегда светлым —
+    модель никогда не видела белый текст на тёмном фоне."""
+    if dark_bg:
+        bg = random.randint(0, 55)
+        fg = random.randint(195, 255)
+    else:
+        bg = random.randint(200, 255)
+        fg = random.randint(0, 60)
+    return bg, fg
+
+
+def _add_background_texture(img: Image.Image) -> Image.Image:
+    """Добавляет шум или мягкий градиент на фон — реальные фото/сканы редко
+    имеют идеально ровную заливку."""
+    arr = np.asarray(img, dtype=np.float32)
+    h, w = arr.shape
+    if random.random() < 0.5:
+        noise = np.random.normal(0, random.uniform(3, 18), (h, w))
+        arr = arr + noise
+    else:
+        direction = random.choice(["h", "v"])
+        ramp = np.linspace(-1, 1, w if direction == "h" else h) * random.uniform(10, 35)
+        grad = np.tile(ramp, (h, 1)) if direction == "h" else np.tile(ramp.reshape(-1, 1), (1, w))
+        arr = arr + grad
+    arr = np.clip(arr, 0, 255).astype(np.uint8)
+    return Image.fromarray(arr, mode="L")
+
+
+def _jpeg_artifact(img: Image.Image) -> Image.Image:
+    """Пережимает изображение в JPEG с низким качеством, чтобы приучить
+    модель к артефактам реальных фото/скриншотов."""
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=random.randint(35, 80))
+    buf.seek(0)
+    return Image.open(buf).convert("L")
+
+
 def render_sample(text: str, font_path: str, img_height: int = 32) -> Image.Image:
-    font_size = random.randint(16, 34)
+    # font_size снижен до 14, чтобы модель училась и на мелком тексте
+    font_size = random.randint(14, 34)
     font = ImageFont.truetype(font_path, font_size)
 
     dummy = Image.new("L", (10, 10), 255)
@@ -53,17 +95,30 @@ def render_sample(text: str, font_path: str, img_height: int = 32) -> Image.Imag
     w = max(bbox[2] - bbox[0] + 12, 10)
     h = max(bbox[3] - bbox[1] + 12, 10)
 
-    bg = random.randint(200, 255)
-    fg = random.randint(0, 60)
+    # ~45% сэмплов — тёмный фон/светлый текст (раньше не встречалось вообще)
+    dark_bg = random.random() < 0.45
+    bg, fg = _random_bg_fg(dark_bg)
+
     img = Image.new("L", (w, h), color=bg)
     draw = ImageDraw.Draw(img)
     draw.text((6, 6), text, font=font, fill=fg)
+
+    # Текстура/шум фона вместо идеально ровной заливки
+    if random.random() < 0.6:
+        img = _add_background_texture(img)
+
+    if random.random() < 0.4:
+        img = ImageEnhance.Contrast(img).enhance(random.uniform(0.6, 1.5))
+    if random.random() < 0.4:
+        img = ImageEnhance.Brightness(img).enhance(random.uniform(0.7, 1.3))
 
     # Лёгкие аугментации, чтобы модель была устойчива к качеству реальных фото/сканов
     if random.random() < 0.3:
         img = img.filter(ImageFilter.GaussianBlur(radius=random.uniform(0.3, 1.0)))
     if random.random() < 0.2:
         img = img.rotate(random.uniform(-3, 3), fillcolor=bg, expand=True)
+    if random.random() < 0.25:
+        img = _jpeg_artifact(img)
 
     new_w = max(int(w * img_height / h), 8)
     img = img.resize((new_w, img_height))
